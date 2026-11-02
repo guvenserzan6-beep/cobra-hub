@@ -82,6 +82,7 @@ Config = {
     SafeMode = false,
     UIScale = 30,
     LockUI = false,
+    TeleportEffect = false,
     HideUI = false,
     HideUIKey = "RightControl",
     MobileButtonSize = 50,
@@ -3392,6 +3393,88 @@ end
 
 settings = makePage("Settings")
 
+-- Small replicated position jumps; no network manipulation or forced anchoring.
+do
+    if type(_G.CobraHubTeleportEffectCleanup) == "function" then
+        pcall(_G.CobraHubTeleportEffectCleanup)
+    end
+
+    local activeRoot
+    local appliedOffset = Vector3.new(0, 0, 0)
+    local elapsed = 0
+    local shifted = false
+    local side = 1
+    local heartbeatConnection
+
+    local function clearOffset()
+        if activeRoot and activeRoot.Parent then
+            pcall(function()
+                activeRoot.CFrame = activeRoot.CFrame - appliedOffset
+            end)
+        end
+        activeRoot = nil
+        appliedOffset = Vector3.new(0, 0, 0)
+        shifted = false
+        elapsed = 0
+    end
+
+    local function setEnabled(enabled)
+        if heartbeatConnection then
+            heartbeatConnection:Disconnect()
+            heartbeatConnection = nil
+        end
+        clearOffset()
+        if not enabled then return end
+
+        heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
+            local character = LP.Character
+            local root = character and character:FindFirstChild("HumanoidRootPart")
+            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+            if not root or not humanoid or humanoid.Health <= 0 or humanoid.Sit then
+                clearOffset()
+                return
+            end
+            if activeRoot ~= root then
+                clearOffset()
+                activeRoot = root
+            end
+            elapsed = elapsed + dt
+            if elapsed < 0.18 then return end
+            elapsed = 0
+
+            if shifted then
+                root.CFrame = root.CFrame - appliedOffset
+                appliedOffset = Vector3.new(0, 0, 0)
+                shifted = false
+            else
+                local offset = root.CFrame.RightVector * (2 * side)
+                local params = RaycastParams.new()
+                params.FilterType = Enum.RaycastFilterType.Exclude
+                params.FilterDescendantsInstances = {character}
+                params.RespectCanCollide = true
+                -- Do not jump sideways through a wall.
+                if not Workspace:Raycast(root.Position, offset * 1.5, params) then
+                    root.CFrame = root.CFrame + offset
+                    appliedOffset = offset
+                    shifted = true
+                end
+                side = -side
+            end
+        end)
+    end
+
+    _G.CobraHubTeleportEffectCleanup = function()
+        setEnabled(false)
+    end
+    _G.CobraHubSetTeleportEffect = setEnabled
+
+    toggleRow(settings, "Teleport Effect", Config.TeleportEffect == true, function(state)
+        Config.TeleportEffect = state
+        setEnabled(state)
+    end)
+    setEnabled(Config.TeleportEffect == true)
+end
+
 
 
 main.Active = true
@@ -4027,6 +4110,8 @@ do
         Config.FOVValue = 70
         Config.UIScale = 30
         Config.LockUI = false
+        Config.TeleportEffect = false
+        if _G.CobraHubSetTeleportEffect then _G.CobraHubSetTeleportEffect(false) end
         Config.HideUI = false
         Config.StealBarPosX = nil
         Config.StealBarPosY = nil
