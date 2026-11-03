@@ -3395,6 +3395,10 @@ settings = makePage("Settings")
 
 -- Small replicated position jumps; no network manipulation or forced anchoring.
 do
+    -- How far the character appears to blink away, in studs.
+    local TELEPORT_EFFECT_DISTANCE = 20
+    -- How long each position is held before the next blink, in seconds.
+    local TELEPORT_EFFECT_HOLD = 0.4
     if type(_G.CobraHubTeleportEffectCleanup) == "function" then
         pcall(_G.CobraHubTeleportEffectCleanup)
     end
@@ -3439,7 +3443,7 @@ do
                 activeRoot = root
             end
             elapsed = elapsed + dt
-            if elapsed < 0.18 then return end
+            if elapsed < TELEPORT_EFFECT_HOLD then return end
             elapsed = 0
 
             if shifted then
@@ -3447,13 +3451,13 @@ do
                 appliedOffset = Vector3.new(0, 0, 0)
                 shifted = false
             else
-                local offset = root.CFrame.RightVector * (2 * side)
+                local offset = root.CFrame.RightVector * (TELEPORT_EFFECT_DISTANCE * side)
                 local params = RaycastParams.new()
                 params.FilterType = Enum.RaycastFilterType.Exclude
                 params.FilterDescendantsInstances = {character}
                 params.RespectCanCollide = true
                 -- Do not jump sideways through a wall.
-                if not Workspace:Raycast(root.Position, offset * 1.5, params) then
+                if not Workspace:Raycast(root.Position, offset, params) then
                     root.CFrame = root.CFrame + offset
                     appliedOffset = offset
                     shifted = true
