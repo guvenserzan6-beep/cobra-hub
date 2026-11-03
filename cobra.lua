@@ -82,7 +82,7 @@ Config = {
     SafeMode = false,
     UIScale = 30,
     LockUI = false,
-    TeleportEffect = false,
+    HideMovement = false,
     HideUI = false,
     HideUIKey = "RightControl",
     MobileButtonSize = 50,
@@ -3393,90 +3393,60 @@ end
 
 settings = makePage("Settings")
 
--- Small replicated position jumps; no network manipulation or forced anchoring.
+-- Hide Movement: other players keep seeing the character at the spot where it was enabled.
 do
-    -- How far the character appears to blink away, in studs.
-    local TELEPORT_EFFECT_DISTANCE = 20
-    -- How long each position is held before the next blink, in seconds.
-    local TELEPORT_EFFECT_HOLD = 0.4
+    if type(_G.CobraHubHideMoveCleanup) == "function" then
+        pcall(_G.CobraHubHideMoveCleanup)
+    end
     if type(_G.CobraHubTeleportEffectCleanup) == "function" then
         pcall(_G.CobraHubTeleportEffectCleanup)
+        _G.CobraHubTeleportEffectCleanup = nil
     end
 
-    local activeRoot
-    local appliedOffset = Vector3.new(0, 0, 0)
-    local elapsed = 0
-    local shifted = false
-    local side = 1
-    local heartbeatConnection
-
-    local function clearOffset()
-        if activeRoot and activeRoot.Parent then
-            pcall(function()
-                activeRoot.CFrame = activeRoot.CFrame - appliedOffset
-            end)
-        end
-        activeRoot = nil
-        appliedOffset = Vector3.new(0, 0, 0)
-        shifted = false
-        elapsed = 0
-    end
+    local hbConn, rsConn
+    local frozenCF, activeRoot, realCF
 
     local function setEnabled(enabled)
-        if heartbeatConnection then
-            heartbeatConnection:Disconnect()
-            heartbeatConnection = nil
+        if hbConn then hbConn:Disconnect() hbConn = nil end
+        if rsConn then rsConn:Disconnect() rsConn = nil end
+        if activeRoot and activeRoot.Parent and realCF then
+            pcall(function() activeRoot.CFrame = realCF end)
         end
-        clearOffset()
+        frozenCF, activeRoot, realCF = nil, nil, nil
         if not enabled then return end
 
-        heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
+        hbConn = RunService.Heartbeat:Connect(function()
             local character = LP.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            if not root or not humanoid or humanoid.Health <= 0 or humanoid.Sit then
-                clearOffset()
+            if not root or not humanoid or humanoid.Health <= 0 then
+                activeRoot, frozenCF, realCF = nil, nil, nil
                 return
             end
             if activeRoot ~= root then
-                clearOffset()
                 activeRoot = root
+                frozenCF = root.CFrame
             end
-            elapsed = elapsed + dt
-            if elapsed < TELEPORT_EFFECT_HOLD then return end
-            elapsed = 0
-
-            if shifted then
-                root.CFrame = root.CFrame - appliedOffset
-                appliedOffset = Vector3.new(0, 0, 0)
-                shifted = false
-            else
-                local offset = root.CFrame.RightVector * (TELEPORT_EFFECT_DISTANCE * side)
-                local params = RaycastParams.new()
-                params.FilterType = Enum.RaycastFilterType.Exclude
-                params.FilterDescendantsInstances = {character}
-                params.RespectCanCollide = true
-                -- Do not jump sideways through a wall.
-                if not Workspace:Raycast(root.Position, offset, params) then
-                    root.CFrame = root.CFrame + offset
-                    appliedOffset = offset
-                    shifted = true
-                end
-                side = -side
+            realCF = root.CFrame
+            -- Replicate the frozen spot to the server, then restore locally before render.
+            root.CFrame = frozenCF
+        end)
+        rsConn = RunService.RenderStepped:Connect(function()
+            if activeRoot and activeRoot.Parent and realCF then
+                activeRoot.CFrame = realCF
             end
         end)
     end
 
-    _G.CobraHubTeleportEffectCleanup = function()
-        setEnabled(false)
-    end
-    _G.CobraHubSetTeleportEffect = setEnabled
+    _G.CobraHubHideMoveCleanup = function() setEnabled(false) end
+    _G.CobraHubSetHideMove = setEnabled
 
-    toggleRow(settings, "Teleport Effect", Config.TeleportEffect == true, function(state)
-        Config.TeleportEffect = state
+    toggleRow(settings, "Hide Movement", Config.HideMovement == true, function(state)
+        Config.HideMovement = state
         setEnabled(state)
+        if saveConfig then pcall(saveConfig) end
     end)
-    setEnabled(Config.TeleportEffect == true)
+    setEnabled(Config.HideMovement == true)
 end
 
 
@@ -4114,8 +4084,8 @@ do
         Config.FOVValue = 70
         Config.UIScale = 30
         Config.LockUI = false
-        Config.TeleportEffect = false
-        if _G.CobraHubSetTeleportEffect then _G.CobraHubSetTeleportEffect(false) end
+        Config.HideMovement = false
+        if _G.CobraHubSetHideMove then _G.CobraHubSetHideMove(false) end
         Config.HideUI = false
         Config.StealBarPosX = nil
         Config.StealBarPosY = nil
