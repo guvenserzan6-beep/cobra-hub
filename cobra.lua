@@ -3393,7 +3393,7 @@ end
 
 settings = makePage("Settings")
 
--- Hide Movement: other players keep seeing the character at the spot where it was enabled.
+-- Fake Lag: other players see the character stutter as if on a bad connection.
 do
     if type(_G.CobraHubHideMoveCleanup) == "function" then
         pcall(_G.CobraHubHideMoveCleanup)
@@ -3405,6 +3405,7 @@ do
 
     local hbConn, rsConn
     local frozenCF, activeRoot, realCF
+    local lagTimer, lagFrozen = 0, false
 
     local function setEnabled(enabled)
         if hbConn then hbConn:Disconnect() hbConn = nil end
@@ -3415,7 +3416,7 @@ do
         frozenCF, activeRoot, realCF = nil, nil, nil
         if not enabled then return end
 
-        hbConn = RunService.Heartbeat:Connect(function()
+        hbConn = RunService.Heartbeat:Connect(function(dt)
             local character = LP.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             local humanoid = character and character:FindFirstChildOfClass("Humanoid")
@@ -3428,6 +3429,17 @@ do
                 frozenCF = root.CFrame
             end
             realCF = root.CFrame
+            -- Fake lag: alternate random freeze and catch-up windows.
+            lagTimer = lagTimer - dt
+            if lagTimer <= 0 then
+                lagFrozen = not lagFrozen
+                lagTimer = lagFrozen and (0.3 + math.random() * 0.7) or (0.08 + math.random() * 0.2)
+                if lagFrozen then frozenCF = root.CFrame end
+            end
+            if not lagFrozen then
+                realCF = nil
+                return
+            end
             -- Replicate the frozen spot to the server, then restore locally before render.
             root.CFrame = frozenCF
         end)
@@ -3441,7 +3453,7 @@ do
     _G.CobraHubHideMoveCleanup = function() setEnabled(false) end
     _G.CobraHubSetHideMove = setEnabled
 
-    toggleRow(settings, "Hide Movement", Config.HideMovement == true, function(state)
+    toggleRow(settings, "Fake Lag", Config.HideMovement == true, function(state)
         Config.HideMovement = state
         setEnabled(state)
         if saveConfig then pcall(saveConfig) end
