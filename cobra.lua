@@ -82,7 +82,6 @@ Config = {
     SafeMode = false,
     UIScale = 30,
     LockUI = false,
-    HideMovement = false,
     HideUI = false,
     HideUIKey = "RightControl",
     MobileButtonSize = 50,
@@ -3393,74 +3392,6 @@ end
 
 settings = makePage("Settings")
 
--- Fake Lag: other players see the character stutter as if on a bad connection.
-do
-    if type(_G.CobraHubHideMoveCleanup) == "function" then
-        pcall(_G.CobraHubHideMoveCleanup)
-    end
-    if type(_G.CobraHubTeleportEffectCleanup) == "function" then
-        pcall(_G.CobraHubTeleportEffectCleanup)
-        _G.CobraHubTeleportEffectCleanup = nil
-    end
-
-    local hbConn, rsConn
-    local frozenCF, activeRoot, realCF
-    local lagTimer, lagFrozen = 0, false
-
-    local function setEnabled(enabled)
-        if hbConn then hbConn:Disconnect() hbConn = nil end
-        if rsConn then rsConn:Disconnect() rsConn = nil end
-        if activeRoot and activeRoot.Parent and realCF then
-            pcall(function() activeRoot.CFrame = realCF end)
-        end
-        frozenCF, activeRoot, realCF = nil, nil, nil
-        if not enabled then return end
-
-        hbConn = RunService.Heartbeat:Connect(function(dt)
-            local character = LP.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-            if not root or not humanoid or humanoid.Health <= 0 then
-                activeRoot, frozenCF, realCF = nil, nil, nil
-                return
-            end
-            if activeRoot ~= root then
-                activeRoot = root
-                frozenCF = root.CFrame
-            end
-            realCF = root.CFrame
-            -- Fake lag: alternate random freeze and catch-up windows.
-            lagTimer = lagTimer - dt
-            if lagTimer <= 0 then
-                lagFrozen = not lagFrozen
-                lagTimer = lagFrozen and (0.3 + math.random() * 0.7) or (0.08 + math.random() * 0.2)
-                if lagFrozen then frozenCF = root.CFrame end
-            end
-            if not lagFrozen then
-                realCF = nil
-                return
-            end
-            -- Replicate the frozen spot to the server, then restore locally before render.
-            root.CFrame = frozenCF
-        end)
-        rsConn = RunService.RenderStepped:Connect(function()
-            if activeRoot and activeRoot.Parent and realCF then
-                activeRoot.CFrame = realCF
-            end
-        end)
-    end
-
-    _G.CobraHubHideMoveCleanup = function() setEnabled(false) end
-    _G.CobraHubSetHideMove = setEnabled
-
-    toggleRow(settings, "Fake Lag", Config.HideMovement == true, function(state)
-        Config.HideMovement = state
-        setEnabled(state)
-        if saveConfig then pcall(saveConfig) end
-    end)
-    setEnabled(Config.HideMovement == true)
-end
-
 
 
 main.Active = true
@@ -4096,8 +4027,6 @@ do
         Config.FOVValue = 70
         Config.UIScale = 30
         Config.LockUI = false
-        Config.HideMovement = false
-        if _G.CobraHubSetHideMove then _G.CobraHubSetHideMove(false) end
         Config.HideUI = false
         Config.StealBarPosX = nil
         Config.StealBarPosY = nil
