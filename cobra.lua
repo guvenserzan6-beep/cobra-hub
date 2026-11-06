@@ -8518,21 +8518,63 @@ function cobraCacheProperty(instance, property)
     end
 end
 
+function cobraIsPetObject(instance)
+    local node = instance
+    for _ = 1, 8 do
+        node = node and node.Parent
+        if not node or node == workspace then return false end
+        local n = string.lower(node.Name)
+        if string.find(n, "pet") then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr.Character and node == plr.Character then return false end
+            end
+            return true
+        end
+    end
+    return false
+end
+
 function _applyAntiLagObj(instance)
     if not antiLagState.active then return end
     pcall(function()
+        local isPet = cobraIsPetObject(instance) or string.find(string.lower(instance.Name), "pet") ~= nil
         if instance:IsA("ParticleEmitter") or instance:IsA("Trail") or instance:IsA("Beam")
-            or instance:IsA("Fire") or instance:IsA("Smoke") or instance:IsA("Sparkles") then
+            or instance:IsA("Fire") or instance:IsA("Smoke") or instance:IsA("Sparkles")
+            or instance:IsA("Highlight") or instance:IsA("PointLight") or instance:IsA("SpotLight")
+            or instance:IsA("SurfaceLight") then
             cobraCacheProperty(instance, "Enabled")
             instance.Enabled = false
+        elseif instance:IsA("Explosion") then
+            instance.Visible = false
+        elseif instance:IsA("Decal") or instance:IsA("Texture") then
+            cobraCacheProperty(instance, "Transparency")
+            instance.Transparency = 1
         elseif instance:IsA("BasePart") then
             cobraCacheProperty(instance, "CastShadow")
             instance.CastShadow = false
-            if instance.Material == Enum.Material.Glass or instance.Material == Enum.Material.ForceField then
+            if instance.Material ~= Enum.Material.SmoothPlastic then
                 cobraCacheProperty(instance, "Material")
-                cobraCacheProperty(instance, "Reflectance")
                 instance.Material = Enum.Material.SmoothPlastic
+            end
+            if instance.Reflectance ~= 0 then
+                cobraCacheProperty(instance, "Reflectance")
                 instance.Reflectance = 0
+            end
+            if isPet and not instance.Anchored then
+                cobraCacheProperty(instance, "Anchored")
+                instance.Anchored = true
+            end
+        elseif isPet and (instance:IsA("Animator")) then
+            for _, track in ipairs(instance:GetPlayingAnimationTracks()) do track:Stop(0) end
+            local c = instance.AnimationPlayed:Connect(function(track)
+                if antiLagState.active then track:Stop(0) end
+            end)
+            table.insert(antiLagState.petConns, c)
+        elseif isPet and (instance:IsA("AlignPosition") or instance:IsA("AlignOrientation")
+            or instance:IsA("BodyPosition") or instance:IsA("BodyGyro") or instance:IsA("BodyVelocity")) then
+            if instance:IsA("AlignPosition") or instance:IsA("AlignOrientation") then
+                cobraCacheProperty(instance, "Enabled")
+                instance.Enabled = false
             end
         end
     end)
@@ -8666,7 +8708,38 @@ enableAntiLag = function()
         end
     end
 
-    cobraApplyEmotionalGraphics()
+    -- FPS booster: flat lighting, no shadows/fog, lowest render quality
+    antiLagState.petConns = antiLagState.petConns or {}
+    pcall(function()
+        Lighting.GlobalShadows = false
+        Lighting.FogStart = 0
+        Lighting.FogEnd = 1e9
+        Lighting.Brightness = 1
+        Lighting.EnvironmentDiffuseScale = 0
+        Lighting.EnvironmentSpecularScale = 0
+    end)
+    for _, child in ipairs(Lighting:GetChildren()) do
+        if child:IsA("Atmosphere") or child:IsA("Clouds") or child:IsA("Sky") then
+            antiLagState.removed = antiLagState.removed or {}
+            antiLagState.removed[child] = child.Parent
+            pcall(function() child.Parent = nil end)
+        end
+    end
+    pcall(function()
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain then
+            antiLagState.terrain = {Decoration = terrain.Decoration, WaterWaveSize = terrain.WaterWaveSize,
+                WaterWaveSpeed = terrain.WaterWaveSpeed, WaterReflectance = terrain.WaterReflectance}
+            terrain.Decoration = false
+            terrain.WaterWaveSize = 0
+            terrain.WaterWaveSpeed = 0
+            terrain.WaterReflectance = 0
+        end
+    end)
+    pcall(function()
+        antiLagState.quality = settings().Rendering.QualityLevel
+        settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+    end)
 
     if antiLagState.conn then antiLagState.conn:Disconnect() end
     antiLagState.conn = workspace.DescendantAdded:Connect(function(descendant)
@@ -8687,6 +8760,21 @@ disableAntiLag = function()
     if antiLagState.conn then antiLagState.conn:Disconnect(); antiLagState.conn = nil end
 
     cobraClearBeautyEffects()
+    for _, c in ipairs(antiLagState.petConns or {}) do pcall(function() c:Disconnect() end) end
+    antiLagState.petConns = {}
+    for child, parent in pairs(antiLagState.removed or {}) do pcall(function() child.Parent = parent end) end
+    antiLagState.removed = {}
+    pcall(function()
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        if terrain and antiLagState.terrain then
+            for k, v in pairs(antiLagState.terrain) do terrain[k] = v end
+        end
+        antiLagState.terrain = nil
+    end)
+    pcall(function()
+        if antiLagState.quality then settings().Rendering.QualityLevel = antiLagState.quality end
+        antiLagState.quality = nil
+    end)
 
     for instance, properties in pairs(antiLagState.cache) do
         if instance and instance.Parent then
