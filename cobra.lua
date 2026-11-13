@@ -120,6 +120,7 @@ Config = {
     AutoStealMode = "Normal",
     AutoStealVersion = "V1",
     AutoStealStopAt = 75,
+    AutoStealV3Time = 0.05,
     AutoStealStopWhenHit = false,
     AutoStealHitPauseSeconds = 1.3,
     AutoStealRadius = 61,
@@ -1100,9 +1101,10 @@ function parseNumInput(str)
     return tonumber(str)
 end
 
-function numberBadge(parent, initialValue, offsetX, width, onChanged)
+function numberBadge(parent, initialValue, offsetX, width, onChanged, decimals)
+    local fmtN = function(v) if decimals then local t = string.format("%."..decimals.."f", tonumber(v) or 0):gsub("0+$",""):gsub("%.$","") return t end return formatSpeedNum(v) end
     local btn = Instance.new("TextButton")
-    btn.Text = formatSpeedNum(initialValue)
+    btn.Text = fmtN(initialValue)
     btn.Font = Enum.Font.GothamMedium
     btn.TextSize = 12
     btn.TextColor3 = COLORS.White
@@ -1122,7 +1124,7 @@ function numberBadge(parent, initialValue, offsetX, width, onChanged)
         TweenService:Create(nStroke, TweenInfo.new(0.12), {Transparency = 0.25}):Play()
     end)
 
-    local currentValue = formatSpeedNum(initialValue)
+    local currentValue = fmtN(initialValue)
 
     btn.Activated:Connect(function()
         local box = Instance.new("TextBox")
@@ -1148,8 +1150,9 @@ function numberBadge(parent, initialValue, offsetX, width, onChanged)
             local num = parseNumInput(box.Text)
             if num then
 
-                num = math.floor(num * 10 + 0.5) / 10
-                currentValue = formatSpeedNum(num)
+                local m = 10 ^ (decimals or 1)
+                num = math.floor(num * m + 0.5) / m
+                currentValue = fmtN(num)
                 if onChanged then
                     onChanged(num)
                 end
@@ -1170,7 +1173,7 @@ function numberBadge(parent, initialValue, offsetX, width, onChanged)
     end
 
     local function setValue(v)
-        currentValue = formatSpeedNum(v)
+        currentValue = fmtN(v)
         btn.Text = currentValue
     end
 
@@ -2315,10 +2318,12 @@ modeButtonsRow(combat, { "Normal", "Semi" }, Config.AutoStealMode, function(mode
         Config.AutoStealRadius = Config.AutoStealRadiusSemi or 9
         if stealVersionRow then stealVersionRow.Visible = false end
         if stealStopAtRow then stealStopAtRow.Visible = false end
+        if stealV3TimeRow then stealV3TimeRow.Visible = false end
     else
         Config.AutoStealRadius = Config.AutoStealRadiusNormal or 61
         if stealVersionRow then stealVersionRow.Visible = true end
         if stealStopAtRow then stealStopAtRow.Visible = Config.AutoStealVersion == "V2" end
+        if stealV3TimeRow then stealV3TimeRow.Visible = Config.AutoStealVersion == "V3" end
     end
     if setStealRadiusBadge then setStealRadiusBadge(Config.AutoStealRadius) end
     pcall(function() refreshStealBarMeta() end)
@@ -2329,10 +2334,11 @@ modeButtonsRow(combat, { "Normal", "Semi" }, Config.AutoStealMode, function(mode
 end)
 
 
-if Config.AutoStealVersion == "V3" then Config.AutoStealVersion = "V2" end
 
-stealVersionRow = modeButtonsRow(combat, { "V1", "V2" }, Config.AutoStealVersion, function(ver)
+stealVersionRow = modeButtonsRow(combat, { "V1", "V2", "V3" }, Config.AutoStealVersion, function(ver)
     Config.AutoStealVersion = ver
+    if stealV3TimeRow then stealV3TimeRow.Visible = Config.AutoStealMode ~= "Semi" and ver == "V3" end
+    saveConfig()
     if stealStopAtRow then
         stealStopAtRow.Visible = Config.AutoStealMode ~= "Semi" and ver == "V2"
     end
@@ -2392,6 +2398,14 @@ for index, percent in ipairs(stopAtChoices) do
 end
 refreshStopAtButtons()
 stealStopAtRow.Visible = Config.AutoStealMode ~= "Semi" and Config.AutoStealVersion == "V2"
+
+-- COBRA V3 STEAL TIME: user-set seconds to grab a pet (0.05 - 5)
+Config.AutoStealV3Time = math.clamp(tonumber(Config.AutoStealV3Time) or 0.05, 0.05, 5)
+stealV3TimeRow = rowBase(combat, "V3 Steal Time (s)", false)
+numberBadge(stealV3TimeRow, Config.AutoStealV3Time, -60, 44, function(val)
+    Config.AutoStealV3Time = math.clamp(tonumber(val) or 0.05, 0.05, 5)
+end, 2)
+stealV3TimeRow.Visible = Config.AutoStealMode ~= "Semi" and Config.AutoStealVersion == "V3"
 
 stealRadiusRow = rowBase(combat, "Steal Radius", false)
 _, _, setRad = numberBadge(stealRadiusRow, Config.AutoStealRadius, -60, 44, function(val)
@@ -5864,7 +5878,6 @@ function StealSys.refreshMeta()
             StealSys.titleLabel.Text = "Semi"
         else
             local ver = Config.AutoStealVersion or "V2"
-            if ver == "V3" then ver = "V2" end
             StealSys.titleLabel.Text = "Normal • " .. tostring(ver)
         end
     end
@@ -6088,14 +6101,14 @@ function stealNearestAnimal(radius)
 end
 
 
-function executeStealV1(prompt)
+function executeStealV1(prompt, customDuration)
     if StealSys.isStealing then return end
     local data = stealBuildCallbacks(prompt)
     if not data.ready then return end
     data.ready = false
     StealSys.isStealing = true
     StealSys.stealStart = tick()
-    StealSys.totalDuration = 1.3
+    StealSys.totalDuration = customDuration or 1.3
     updateStealProgress(0, "STEALING")
     task.spawn(function()
         for _, fn in ipairs(data.hold) do task.spawn(fn) end
@@ -6366,9 +6379,10 @@ startAutoStealSystem = function()
 
 
         local ver = Config.AutoStealVersion or "V1"
-        if ver == "V3" then ver = "V2" end
-
-        if ver == "V2" then
+        if ver == "V3" then
+            local prompt = stealFindNearestPrompt(radius)
+            if prompt then executeStealV1(prompt, math.clamp(tonumber(Config.AutoStealV3Time) or 0.05, 0.05, 5)) end
+        elseif ver == "V2" then
             local target, dist = stealNearestAnimal(radius)
             if not target then return end
             if dist and dist > radius then return end
