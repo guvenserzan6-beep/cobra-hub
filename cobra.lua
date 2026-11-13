@@ -4290,7 +4290,7 @@ startBatAimbot=function()
         local targetPos = target.Position
 
         local targetVelocity = target.AssemblyLinearVelocity
-        local predictionTime = 0.14
+        local predictionTime = 0.18
         local targetLook = target.CFrame.LookVector
         local predictedPos = targetPos + targetVelocity * predictionTime + targetLook * 0.3
         local lead = predictedPos - targetPos
@@ -4333,7 +4333,11 @@ startBatAimbot=function()
         yVel = math.clamp(yVel, -70, 110)
 
         local desiredVel = Vector3.new(flatDir.X * chaseSpeed, yVel, flatDir.Z * chaseSpeed)
-        root.AssemblyLinearVelocity = root.AssemblyLinearVelocity:Lerp(desiredVel, 0.8)
+        -- smoother arrival: ease speed down near the chase point to avoid overshoot/jitter
+        local flatDist = Vector3.new(direction.X, 0, direction.Z).Magnitude
+        local arriveScale = math.clamp(flatDist / 4, 0.35, 1)
+        desiredVel = Vector3.new(desiredVel.X * arriveScale + targetVelocity.X * (1 - arriveScale), desiredVel.Y, desiredVel.Z * arriveScale + targetVelocity.Z * (1 - arriveScale))
+        root.AssemblyLinearVelocity = root.AssemblyLinearVelocity:Lerp(desiredVel, 0.92)
 
         local travelDir = Vector3.new(targetVelocity.X, 0, targetVelocity.Z)
         if travelDir.Magnitude > 1.25 then
@@ -4343,7 +4347,7 @@ startBatAimbot=function()
         end
         local facePos = myPos + travelDir * 10
         if (facePos - myPos).Magnitude > 0.1 then
-            root.CFrame = CFrame.lookAt(myPos, facePos)
+            root.CFrame = root.CFrame:Lerp(CFrame.lookAt(myPos, facePos), 0.55)
             root.AssemblyAngularVelocity = Vector3.zero
         end
 
